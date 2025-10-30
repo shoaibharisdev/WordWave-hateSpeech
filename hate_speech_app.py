@@ -6,52 +6,48 @@ from transformers import BertTokenizer, BertForSequenceClassification
 import os
 import gc
 
-# Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
 # ===== HATE SPEECH DETECTION SETUP =====
+# Model will be loaded at startup - no lazy loading
 model = None
 tokenizer = None
-model_loaded = False
 
-# Define labels for toxic-bert
 TOXIC_LABELS = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
 
 def load_hate_speech_model():
-    """Load the hate speech model only when needed"""
-    global model, tokenizer, model_loaded
-    
-    if model_loaded:
-        return tokenizer, model
-        
+    """Load the hate speech model at startup"""
+    global model, tokenizer
     try:
         print("🔄 Loading hate speech model...")
         tokenizer = BertTokenizer.from_pretrained("unitary/toxic-bert")
         model = BertForSequenceClassification.from_pretrained("unitary/toxic-bert")
         model.eval()
-        model_loaded = True
         print("✅ Hate speech model loaded successfully")
-        return tokenizer, model
+        return True
     except Exception as e:
         print(f"❌ Hate speech model loading failed: {e}")
-        return None, None
+        return False
 
 def predict_hate_speech(text):
-    """
-    Predict if text contains hate speech using toxic-bert model.
-    This model is multi-label, so we use sigmoid activation and thresholds.
-    """
-    tokenizer_local, model_local = load_hate_speech_model()
+    """Predict hate speech - model is always loaded"""
+    global model, tokenizer
     
-    if tokenizer_local is None or model_local is None:
+    if model is None or tokenizer is None:
         return {"error": "Hate speech model not available"}
     
     try:
-        inputs = tokenizer_local(text, return_tensors="pt", truncation=True, padding=True, max_length=128)
+        inputs = tokenizer(
+            text, 
+            return_tensors="pt", 
+            truncation=True, 
+            padding=True, 
+            max_length=128
+        )
         
         with torch.no_grad():
-            outputs = model_local(**inputs)
+            outputs = model(**inputs)
             probabilities = sigmoid(outputs.logits)
         
         threshold = 0.5
@@ -73,9 +69,9 @@ def predict_hate_speech(text):
             primary_category = max(detected_categories, key=lambda x: x['confidence'])
             classification = primary_category['label']
         else:
-            classification = "Not classified as any category"
+            classification = "clean"
         
-        # Clean up
+        # Clean up memory
         del inputs, outputs, probabilities
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -95,49 +91,45 @@ def predict_hate_speech(text):
 @app.route('/api/predict', methods=['POST'])
 def predict_hate_speech_endpoint():
     """API endpoint for hate speech prediction"""
-    data = request.get_json()
-    text = data.get('text', '')
-    
-    if not text:
-        return jsonify({'error': 'Text field is required'}), 400
-    
-    result = predict_hate_speech(text)
-    return jsonify(result)
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No JSON data provided'}), 400
+            
+        text = data.get('text', '')
+        
+        if not text:
+            return jsonify({'error': 'Text field is required'}), 400
+        
+        result = predict_hate_speech(text)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint for hate speech detection"""
+    """Health check endpoint"""
     return jsonify({
-        'status': 'healthy', 
+        'status': 'healthy' if model is not None else 'unhealthy',
         'model': 'toxic-bert',
-        'model_status': 'loaded' if model_loaded else 'ready (lazy-load)'
+        'model_loaded': model is not None
     })
 
 @app.route('/', methods=['GET'])
 def home():
-    """Home endpoint with API information"""
+    """Home endpoint"""
     return jsonify({
         "message": "Hate Speech Detection API",
-        "version": "1.0.0",
-        "endpoints": {
-            "predict": "POST /api/predict",
-            "health": "GET /api/health"
-        },
-        "model": {
-            "name": "unitary/toxic-bert",
-            "type": "multi-label classification",
-            "labels": TOXIC_LABELS
-        }
+        "status": "running",
+        "model_ready": model is not None
     })
 
-@app.before_request
-def before_first_request():
-    """Initialize on first request"""
-    global model_loaded
-    if not model_loaded:
-        print("🚀 Initializing Hate Speech Detection API...")
+# Load model at application startup
+print("🚀 Starting Hate Speech Detection API...")
+print("📥 Pre-loading hate speech model...")
+load_hate_speech_model()
+print("✅ Application startup complete!")
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8000))
-    print(f"🚀 Starting Hate Speech Detection API on port {port}...")
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=False)
