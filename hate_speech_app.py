@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import torch
-from torch.nn.functional import softmax
+from torch.nn.functional import sigmoid
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import os
 import gc
@@ -10,19 +10,20 @@ app = Flask(__name__)
 CORS(app)
 
 # ===== HATE SPEECH DETECTION SETUP =====
-# Using a MUCH smaller model that fits in 512MB
+# Using a smaller, more efficient model
 model = None
 tokenizer = None
 
-# Ultra-lightweight model for free tier
-MODEL_NAME = "microsoft/DialogRPT-offensive"  # Very small model ~100MB
+# Using a smaller model that fits in 512MB
+MODEL_NAME = "cardiffnlp/twitter-roberta-base-offensive"  # Much smaller model
+
+TOXIC_LABELS = ["offensive", "not_offensive"]  # Simplified labels for smaller model
 
 def load_hate_speech_model():
     """Load a smaller hate speech model"""
     global model, tokenizer
     try:
         print("🔄 Loading hate speech model...")
-        print(f"📥 Using model: {MODEL_NAME}")
         tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
         model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
         model.eval()
@@ -50,20 +51,19 @@ def predict_hate_speech(text):
         
         with torch.no_grad():
             outputs = model(**inputs)
-            probabilities = softmax(outputs.logits, dim=1)
+            probabilities = torch.softmax(outputs.logits, dim=1)
         
         # Get the prediction (offensive or not)
         prediction = torch.argmax(probabilities, dim=1).item()
         confidence = probabilities[0][prediction].item()
         
-        # For this model: 0 = offensive, 1 = not offensive
-        is_hate = (prediction == 0)
+        is_hate = (prediction == 0)  # 0 = offensive, 1 = not offensive
         
-        # Clean up memory aggressively
+        # Clean up memory
         del inputs, outputs, probabilities
-        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        gc.collect()
         
         return {
             "hate_speech": bool(is_hate),
