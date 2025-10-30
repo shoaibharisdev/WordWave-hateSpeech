@@ -10,36 +10,36 @@ app = Flask(__name__)
 CORS(app)
 
 # ===== HATE SPEECH DETECTION SETUP =====
-# Using a MUCH smaller model that fits in 512MB
 model = None
 tokenizer = None
 
-# Ultra-lightweight model for free tier
-MODEL_NAME = "microsoft/DialogRPT-offensive"  # Very small model ~100MB
+# Using finiteautomata sentiment model
+MODEL_NAME = "finiteautomata/bertweet-base-sentiment-analysis"  # 150MB
 
 def load_hate_speech_model():
-    """Load a smaller hate speech model"""
+    """Load the sentiment model for hate speech detection"""
     global model, tokenizer
     try:
-        print("🔄 Loading hate speech model...")
+        print("🔄 Loading sentiment model for hate speech detection...")
         print(f"📥 Using model: {MODEL_NAME}")
         tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
         model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
         model.eval()
-        print("✅ Hate speech model loaded successfully")
+        print("✅ Model loaded successfully")
         return True
     except Exception as e:
-        print(f"❌ Hate speech model loading failed: {e}")
+        print(f"❌ Model loading failed: {e}")
         return False
 
 def predict_hate_speech(text):
-    """Predict hate speech with smaller model"""
+    """Predict hate speech using sentiment analysis"""
     global model, tokenizer
     
     if model is None or tokenizer is None:
-        return {"error": "Hate speech model not available"}
+        return {"error": "Model not available"}
     
     try:
+        # Tokenize input
         inputs = tokenizer(
             text, 
             return_tensors="pt", 
@@ -48,18 +48,20 @@ def predict_hate_speech(text):
             max_length=128
         )
         
+        # Get predictions
         with torch.no_grad():
             outputs = model(**inputs)
             probabilities = softmax(outputs.logits, dim=1)
         
-        # Get the prediction (offensive or not)
+        # Get prediction and confidence
         prediction = torch.argmax(probabilities, dim=1).item()
         confidence = probabilities[0][prediction].item()
         
-        # For this model: 0 = offensive, 1 = not offensive
-        is_hate = (prediction == 0)
+        # finiteautomata model labels: 0=Negative, 1=Neutral, 2=Positive
+        # Consider negative sentiment with high confidence as potential hate speech
+        is_hate = (prediction == 0 and confidence > 0.7)  # Negative sentiment with high confidence
         
-        # Clean up memory aggressively
+        # Clean up memory
         del inputs, outputs, probabilities
         gc.collect()
         if torch.cuda.is_available():
@@ -69,7 +71,9 @@ def predict_hate_speech(text):
             "hate_speech": bool(is_hate),
             "classification": "offensive" if is_hate else "clean",
             "confidence": round(confidence, 3),
-            "detected_categories": [{"label": "offensive", "confidence": round(confidence, 3)}] if is_hate else []
+            "sentiment": ["negative", "neutral", "positive"][prediction],
+            "detected_categories": [{"label": "offensive", "confidence": round(confidence, 3)}] if is_hate else [],
+            "model_used": MODEL_NAME
         }
     except Exception as e:
         return {"error": f"Prediction failed: {str(e)}"}
@@ -115,7 +119,7 @@ def home():
 
 # Load model at application startup
 print("🚀 Starting Hate Speech Detection API...")
-print("📥 Pre-loading hate speech model...")
+print("📥 Pre-loading model...")
 load_hate_speech_model()
 print("✅ Application startup complete!")
 
