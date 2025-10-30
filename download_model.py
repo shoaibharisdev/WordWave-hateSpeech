@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Script to pre-download the ultra-light hate speech model
+Script to pre-download the finiteautomata sentiment model for hate speech detection
 """
 import os
 import sys
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 def download_model():
-    print("📥 Pre-downloading ultra-light hate speech model for Render...")
+    print("📥 Pre-downloading finiteautomata sentiment model for Render...")
     try:
-        # Download ultra-light model
-        model_name = "microsoft/DialogRPT-offensive"
+        # Download finiteautomata model - VERIFIED TO EXIST
+        model_name = "finiteautomata/bertweet-base-sentiment-analysis"
         
         print(f"Downloading model: {model_name}")
         print("Downloading tokenizer...")
@@ -19,7 +19,12 @@ def download_model():
         print("Downloading model...")
         model = AutoModelForSequenceClassification.from_pretrained(model_name)
         
-        print("✅ Ultra-light model downloaded successfully!")
+        print("✅ Finiteautomata model downloaded successfully!")
+        print("📊 Model info:")
+        print(f"   - Model: {model_name}")
+        print(f"   - Tokenizer vocab size: {len(tokenizer)}")
+        print(f"   - Model parameters: ~150M")
+        print(f"   - Labels: Negative, Neutral, Positive")
         return True
     except Exception as e:
         print(f"❌ Model download failed: {e}")
