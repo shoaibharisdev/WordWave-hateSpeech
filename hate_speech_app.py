@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import torch
 from torch.nn.functional import sigmoid
-from transformers import BertTokenizer, BertForSequenceClassification
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import os
 import gc
 
@@ -10,19 +10,22 @@ app = Flask(__name__)
 CORS(app)
 
 # ===== HATE SPEECH DETECTION SETUP =====
-# Model will be loaded at startup - no lazy loading
+# Using a smaller, more efficient model
 model = None
 tokenizer = None
 
-TOXIC_LABELS = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
+# Using a smaller model that fits in 512MB
+MODEL_NAME = "cardiffnlp/twitter-roberta-base-offensive"  # Much smaller model
+
+TOXIC_LABELS = ["offensive", "not_offensive"]  # Simplified labels for smaller model
 
 def load_hate_speech_model():
-    """Load the hate speech model at startup"""
+    """Load a smaller hate speech model"""
     global model, tokenizer
     try:
         print("🔄 Loading hate speech model...")
-        tokenizer = BertTokenizer.from_pretrained("unitary/toxic-bert")
-        model = BertForSequenceClassification.from_pretrained("unitary/toxic-bert")
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+        model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
         model.eval()
         print("✅ Hate speech model loaded successfully")
         return True
@@ -31,7 +34,7 @@ def load_hate_speech_model():
         return False
 
 def predict_hate_speech(text):
-    """Predict hate speech - model is always loaded"""
+    """Predict hate speech with smaller model"""
     global model, tokenizer
     
     if model is None or tokenizer is None:
@@ -48,28 +51,13 @@ def predict_hate_speech(text):
         
         with torch.no_grad():
             outputs = model(**inputs)
-            probabilities = sigmoid(outputs.logits)
+            probabilities = torch.softmax(outputs.logits, dim=1)
         
-        threshold = 0.5
-        predictions = probabilities[0].tolist()
-        detected_categories = []
-        max_confidence = 0.0
+        # Get the prediction (offensive or not)
+        prediction = torch.argmax(probabilities, dim=1).item()
+        confidence = probabilities[0][prediction].item()
         
-        for i, label in enumerate(TOXIC_LABELS):
-            if predictions[i] > threshold:
-                detected_categories.append({
-                    "label": label,
-                    "confidence": round(predictions[i], 3)
-                })
-                max_confidence = max(max_confidence, predictions[i])
-        
-        is_hate = len(detected_categories) > 0
-        
-        if is_hate:
-            primary_category = max(detected_categories, key=lambda x: x['confidence'])
-            classification = primary_category['label']
-        else:
-            classification = "clean"
+        is_hate = (prediction == 0)  # 0 = offensive, 1 = not offensive
         
         # Clean up memory
         del inputs, outputs, probabilities
@@ -78,10 +66,10 @@ def predict_hate_speech(text):
         gc.collect()
         
         return {
-            "hate_speech": is_hate,
-            "classification": classification,
-            "confidence": round(max_confidence, 3) if is_hate else 0.0,
-            "detected_categories": detected_categories
+            "hate_speech": bool(is_hate),
+            "classification": "offensive" if is_hate else "clean",
+            "confidence": round(confidence, 3),
+            "detected_categories": [{"label": "offensive", "confidence": round(confidence, 3)}] if is_hate else []
         }
     except Exception as e:
         return {"error": f"Prediction failed: {str(e)}"}
@@ -111,7 +99,7 @@ def health_check():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy' if model is not None else 'unhealthy',
-        'model': 'toxic-bert',
+        'model': MODEL_NAME,
         'model_loaded': model is not None
     })
 
@@ -121,7 +109,8 @@ def home():
     return jsonify({
         "message": "Hate Speech Detection API",
         "status": "running",
-        "model_ready": model is not None
+        "model_ready": model is not None,
+        "model": MODEL_NAME
     })
 
 # Load model at application startup

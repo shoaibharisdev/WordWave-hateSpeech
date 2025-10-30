@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
 """
-Script to pre-download the hate speech model during Render build phase
+Script to pre-download the smaller hate speech model
 """
 import os
 import sys
-from transformers import BertTokenizer, BertForSequenceClassification
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 def download_model():
-    print("📥 Pre-downloading hate speech model for Render...")
+    print("📥 Pre-downloading smaller hate speech model for Render...")
     try:
-        # Download tokenizer
+        # Download smaller model
+        model_name = "cardiffnlp/twitter-roberta-base-offensive"
+        
         print("Downloading tokenizer...")
-        tokenizer = BertTokenizer.from_pretrained("unitary/toxic-bert")
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
         
-        # Download model
         print("Downloading model...")
-        model = BertForSequenceClassification.from_pretrained("unitary/toxic-bert")
+        model = AutoModelForSequenceClassification.from_pretrained(model_name)
         
-        print("✅ Model downloaded successfully!")
+        print("✅ Smaller model downloaded successfully!")
         return True
     except Exception as e:
         print(f"❌ Model download failed: {e}")
